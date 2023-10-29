@@ -1,0 +1,715 @@
+---
+title: 'Lab 3: Mixture Models and Clustering'
+date: "October, 12th, 2023"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 7, fig.height = 5) 
+```
+
+## Goal
+
+In this lab we will explore some basics of mixture modeling and clustering. Mixture models are closely related to clustering, but also to RNA-Seq analysis, which will be the topics of a future lab. We will also learn about an important tool for quantifying uncertainty: the bootstrap. Last, we will learn about clustering using an example from mass cytometry. 
+
+Work through this lab by running all the R code on your computer and making sure 
+that you understand the input and the output. Make alterations where you see
+fit. We encourage you to work through this lab using CoPilot in RStudio. 
+
+This lab is a bit longer than some of the others, so be sure to set aside adequate time.
+
+## Load packages
+
+```{r setup, message = FALSE, warning = FALSE, results = 'hide'}
+pkgs_needed = c("tidyverse", "ggplot2", "mixtools", "HistData",
+                "bootstrap", "ggbeeswarm", "pasilla", "matrixStats", "DESeq2")
+pkgs_needed = c(pkgs_needed, "dbscan","GGally", "pheatmap",
+                "flowCore","flowViz", "ggcyto")
+BiocManager::install(setdiff(pkgs_needed, installed.packages()))
+library("tidyverse")
+library("ggplot2")
+library("mixtools")
+library("HistData")
+library("bootstrap")
+library("ggbeeswarm")
+library("pasilla")
+library("matrixStats")
+library("DESeq2")
+```
+
+
+```{r RCppIssue, include=FALSE, eval=FALSE}
+# *Note: if you have trouble installing DESeq2, you may have to temporarily install an older version of RCppArmadillo using the code chunk below.*
+packageurl <- "https://cran.r-project.org/src/contrib/Archive/RcppArmadillo/RcppArmadillo_0.9.900.3.0.tar.gz"
+install.packages(packageurl, repos=NULL, type="source")
+```
+
+## Introduction
+
+In the lectures and in the book we saw an example where sequences could come either from CpG islands, or not, and that the nucleotide patterns were different in each. Sometimes we can model the data as a mixture of two (or a few) components: we call these finite mixtures. Infinite mixture models are models where the number of components is proportional to the number of observations (we'll talk about these more in a future lab).
+
+We also saw how a simple generative model with a Poisson distribution allowed us to make useful inferences for the detection of an epitope. Unfortunately, as we might expect, it is not usually possible to fit real data with such a simple model. Nevertheless, using the "mixture model" framework, simple models such as the normal or Poisson distributions can serve as *building blocks* for more realistic models. This type of model occurs naturally for flow cytometry data, biometric measurements, RNA-seq, Chip-Seq, microbiome and many other types of data collected using modern biotechnology.
+
+## Finite Mixtures
+
+### Simple examples and computer experiments
+
+Here is a first example of a mixture model with two equally important 
+components. We decompose the generating process into steps:
+
+1. Flip a fair coin
+2. If it comes up heads, generate a random number from a normal with mean 1 and variance 0.25.
+3. If it comes up tails, generate a random number from a normal with mean 3 and variance 0.25.
+
+Let's produce a histogram by repeating these three steps 10,000 times.
+
+```{r TwoNormals}
+coinflips = (runif(10000) > 0.5)
+table(coinflips)
+
+sds   = c(0.5, 0.5)
+means = c(  1,   3)
+
+fairmix = rnorm(length(coinflips),
+                mean = ifelse(coinflips, means[1], means[2]),
+                sd   = ifelse(coinflips, sds[1],   sds[2]))
+fairdf = data.frame(fairmix)
+ggplot(fairdf, aes(x = fairmix)) +
+    geom_histogram(fill = "skyblue", binwidth = 0.2)
+```
+
+How many modes are there in the above plot? 
+#Answer: 2
+
+**Quiz Question 1:**  Modify the `means` variable above so that there is only one mode in the above plot. How small does the difference between the two means have to be before we only observe one mode in the resulting histogram? (*Note*: the question will be multiple choice, so you don't need to precisely nail this down).
+
+# Options: 0.2, 1, 0.5, 2
+# Answer: 1
+
+```{r TwoNormals}
+coinflips = (runif(10000) > 0.5)
+table(coinflips)
+
+sds   = c(0.5, 0.5)
+means = c(  1,   2.1)
+
+fairmix = rnorm(length(coinflips),
+                mean = ifelse(coinflips, means[1], means[2]),
+                sd   = ifelse(coinflips, sds[1],   sds[2]))
+fairdf = data.frame(fairmix)
+ggplot(fairdf, aes(x = fairmix)) +
+    geom_histogram(fill = "skyblue", binwidth = 0.2)
+```
+
+You may find that increasing the number of observations makes it easier to precisely answer questions like Quiz Question 1. Modify the code below to simulate one million coin flips and make a histogram with 500 bins.
+
+```{r}
+B = 1e+6
+coinflips = (runif(B) > 0.5)
+fairmix = rnorm(length(coinflips),
+                mean = ifelse(coinflips, means[1], means[2]),
+                sd   = ifelse(coinflips, sds[1],   sds[2]))
+fairdf = data.frame(fairmix)
+ggplot(fairdf, aes(x = fairmix)) +
+    geom_histogram(fill = "sienna", bins = 500)
+
+```
+
+What you should see is that as we obtain more observations, the histogram 
+is approaching a smooth curve. The smooth curve that we obtain in the limit
+of infinitely many observations is called  *the density function* of the random variable `fairmix`.
+
+Normal random variables often appear in mixture models. The density function for a normal ${\mathcal N}(\mu,\sigma)$ random variable, usually denoted as $\phi(x)$,
+can be written explicitly, 
+$$\phi(x)=\frac{1}{\sigma \sqrt{2\pi}}\exp\left(-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\right)^2\right)$$.
+
+Next we will proceed as follows:
+
+1) For cases where `coinflip` was `TRUE`, make a histogram of `fairmix` values.
+Use a binwidth of 0.01, choose `y = ..density..` in the `aes`
+mapping function, which indicates that the vertical axis is the density of counts 
+(i.e., values such that the area of the histograms is 1).
+2) Overlay the line corresponding to $\phi(z)$
+
+```{r overlaydensity, warning = FALSE}
+faird = data.frame(fairdf,coinflips)
+setone = dplyr::filter(faird, coinflips)
+fnpoints = faird[sample(nrow(faird), 1000), ]
+ggplot(setone, aes(x= fairmix)) +
+   geom_histogram(aes(y = ..density..), fill = "thistle1", binwidth = 0.01) +
+   stat_function(fun = dnorm, data = fnpoints,
+                 args = list(mean = means[1], sd = sds[1]), color = "springgreen")
+```
+
+In fact, we can write the mathematical formula for the density of `faircoin` (the limiting curve that the histograms tend to look like as the number of observations gets arbitrarily large) as a sum of the two densities.
+
+\begin{equation}
+f(x)=\frac{1}{2}\phi_1(x)+\frac{1}{2}\phi_2(x)
+\label{eq:halfhalf}
+\end{equation}
+
+where $\phi_1$ is the density of the normal ${\mathcal N}(\mu_1=1,\sigma^2=0.25)$
+and $\phi_2$ is the density of the normal ${\mathcal N}(\mu_2=3,\sigma^2=0.25)$.
+Hence by using the function `dnorm` we can produce theoretical density plots as below:
+
+
+```{r Density2}
+xs = seq(-1, 5, length = 1000)
+dens2 = 0.5 * dnorm(xs, mean = means[1], sd = sds[1])+
+        0.5 * dnorm(xs, mean = means[2], sd = sds[2])
+fairtheory = data.frame(xs,dens2)
+ggplot(fairtheory) + aes(x = xs, y = dens2) +
+  geom_line(color = "springgreen") + ylab("mixture density")
+```
+
+In this case  the mixture model is extremely visible as the two components
+have little overlap. The figure shows two distinct peaks, and
+we call this a bimodal distribution. This happens when we have two 
+very distinct populations with different means. In real data, the separation is often not so 
+pronounced.
+
+```{r histmystery, warning=FALSE}
+set.seed(1233341)
+sds = rep(sqrt(0.5), 2)
+means = c(1, 2)
+coinflips = (runif(1000) > 0.5)
+
+output = rnorm(length(coinflips),
+               mean = ifelse(coinflips, means[1], means[2]),
+                sd   = ifelse(coinflips, sds[1],   sds[2]))
+
+ht = hist(output, nclass = 30, plot = FALSE)
+maxcount = max(ht$count)
+mysterydata = data.frame(x = output, group = ifelse(coinflips, "A", "B"))
+xmin = min(output); xmax = max(output)
+
+ggplot(mysterydata, aes(x = x)) +
+  geom_histogram(fill = "orange", bins = 30)+
+  xlim(c(xmin, xmax)) + ylim(c(0, maxcount))
+```
+
+If we color in red the histogram that was generated from
+the *heads* coin flip and blue the one from *tails*, we can see the
+the two underlying distributions. To do so, we introduce a new way of dealing with 
+data frames in `dplyr`. Instead of passing the data frame directly to the `filter` function as
+an argument, we use the `%>%` operator to "pipe" the data frame to the filter function (which now only includes the filtering condition `group == ?`). Though it is never strictly necessary to use this functionality, this syntax
+can be particularly helpful when we need to perform multiple operations on a data frame (e.g., first filtering the data frame based on a condition and then selecting columns).
+
+```{r betterhistogram, message=FALSE,warning=FALSE}
+head(mysterydata, 5)
+ggplot(mysterydata, aes(x = x, group= group)) +
+  geom_histogram(data = mysterydata %>% dplyr::filter(group == "A"),
+                 fill = "red",  alpha = 0.3, bins = 30) +
+  geom_histogram(data = mysterydata %>% dplyr::filter(group == "B"),
+                 fill = "darkblue", alpha = 0.3, bins = 30) +
+  xlim(c(xmin,xmax))+ ylim(c(0, maxcount))
+```
+
+The overlapping points are  piled up on top of each other in the final 
+histogram.
+
+Here it is in an overlaid plot showing the three histograms: 
+the two components and the mixture in orange.
+
+
+```{r comparecomponents, message=FALSE, warning=FALSE}
+ggplot(mysterydata, aes(x = x)) +
+  geom_histogram(fill = "orange", alpha = 0.4, bins=30) +
+  geom_histogram(data = mysterydata %>% dplyr::filter(group == "A"),
+                 fill = "red",  alpha = 0.4 , bins=30) +
+  geom_histogram(data = mysterydata %>% dplyr::filter(group == "B"),
+                 fill = "darkblue", alpha = 0.4, bins=30) +
+  xlim(c(xmin,xmax))+ ylim(c(0, maxcount)) 
+```
+
+Here we were able to color each of the components using the function
+`filter` from the `dplyr` package because we knew how we had generated 
+the points, their provenance was either A or B depending on the original 
+coinflip. In real data, this information is missing.
+
+**Quiz Question 2**: Construct a qq plot to assess how well a normal model would fit the data above (which is sampled from a mixture of normals). Does the normal model provide a good fit for this data?
+
+# Yes
+
+```{r}
+qqnorm(mysterydata$x, pch = 1, frame = FALSE)
+qqline(mysterydata$x, col = "steelblue", lwd = 2)
+library("car")
+qqPlot(mysterydata$x)
+```
+
+
+## Discovering the hidden class labels
+
+In the case of simple parametric components, we use a method called the
+expectation-maximization (EM) algorithm to infer the value of the hidden
+groupings. The expectation-maximization algorithm is a popular
+iterative procedure that alternates between
+
+* pretending we know the probability with which each observation belongs 
+to a component and estimating the parameters of the components,
+* and pretending we know the parameters of the component distributions 
+and estimating the probability with which each observation belongs to the 
+components.
+
+
+### Mixture of normals
+
+Suppose we have a  mixture of two normals with mean parameters unknown 
+and standard deviations $1$: 
+$$\mu_1=?,\,\mu_2=?,\,\sigma_1=\sigma_2=1.$$
+
+Here is an example of data  generated according to this model, the 
+labels are $u$.
+
+```{r mixnorm1}
+set.seed(198435)
+mus = c(-0.5,1.5)
+u = sample(2, 20, replace = TRUE)
+y = rnorm(length(u), mean = mus[u])
+duy = data.frame(u, y)
+group_by(duy, u)[1:6, ]
+```
+
+If we knew the true labels, we could split the data into two independent
+pieces and estimate parameters for each piece independently:
+
+```{r mixnorm2}
+group_by(duy, u) %>% summarize(mean(y))
+```
+
+In reality we do not know the $u$ labels, nor do we know the mixture is balanced
+(i.e. $\alpha=\frac{1}{2}$). We have to start with initial guesses for
+the labels and the parameters and go through several iterations of the 
+algorithm, updating at each step our current best guess of the group labels and
+the parameters until we see no substantial improvement in our optimizations.
+
+A somewhat more elaborate implementation of this algorithm has been implemented 
+in the `mixtools` package:
+
+```{r mixtools,message = FALSE}
+library("mixtools")
+n     = c( 100,  50)
+mu    = c(-0.2, 0.5)
+sigma = c( 0.5,   1)
+
+y = c(rnorm(n[1], mu[1], sd = sigma[1]), rnorm(n[2], mu[2], sigma[2]))
+gm = normalmixEM(y, k = 2, lambda = c(0.5, 0.5),
+                 mu = c(-0.02, 0.02), sigma = c(1, 1))
+gm$lambda
+gm$mu
+gm$sigma
+```
+
+What happens when you substantially increase the sample sizes n[1] and n[2]? Why do you get different results every time you run this code, and how can you make it always produce the same result?
+
+**Quiz Question 3**: Why can't we apply the Maximum Likelihood Estimation technique to estimate the parameters of a mixture model? 
+
+**Quiz Question 4**: Consider generating data from mixtures of more than two normal random variables. Given a fixed number of total observations, does the error of the EM algorithm tend to decrease or increase?
+
+## Bootstrap
+
+In this section we consider the the differences in heights of 15 pairs 
+(15 self hybridized and 15  crossed) of  *Zea Mays* plants. These data were generated 
+by Darwin in a carefully designed paired experiment (see book).
+
+```{r ecdfZea,fig.height=2, fig.width=4}
+library("HistData")
+ZeaMays$diff
+ggplot(data.frame(ZeaMays, y = 1/15),
+       aes(x = diff, ymax = 1/15, ymin = 0)) +
+  geom_linerange(linewidth=1, col= "forestgreen") +
+  ylim(0, 0.25)
+```
+
+We use simulations as described above to approximate the sampling distribution 
+for the median of the Zea Mays differences: 
+
+Draw $B=10,000$ samples of size 15 from the 15 values (each their own little 
+component in the 15 part mixture). Then compute the 10,000 medians of each 
+of these sets of 15 values and look at their distribution:
+
+```{r bootmedian}
+set.seed(1)
+B = 10000
+difference = ZeaMays$diff
+samplesIdx = replicate(B, sample(15, 15, replace = TRUE))
+samplingDist = apply(samplesIdx, 2, function(x) median(difference[x]) )
+
+ggplot(data.frame(samplingDist), aes(x = samplingDist)) +
+  geom_histogram(bins = 30, fill = "skyblue")
+```
+
+Can you use `geom_vline` to visualize the median of the full 
+(non-simulated) `ZeaMays$diff` dataset? Where does it lie compared to 
+the medians calculated via bootstrapping?
+
+```{r bootmedia2}
+ggplot(data.frame(samplingDist), aes(x = samplingDist)) +
+  geom_histogram(bins = 30, fill = "skyblue") +
+  geom_vline(xintercept = median(difference))
+```
+
+**Quiz Question 5**: Give the upper end of a 95\% confidence interval for the median based on the above bootstrap sample. Hint: Use the `quantile` function.
+
+```{r}
+quantile(samplingDist)
+quantile(samplingDist, probs = 0.97)
+```
+
+
+
+## Mass cytometry (CyTOF)
+
+```{r}
+library("flowCore")
+library("flowViz")
+library("ggcyto")
+```
+
+Cytometry is a biophysical technology that allows you to measure
+physical and chemical characteristics of cells. Modern flow and mass 
+cytometry allows for simultaneous multiparametric analysis of thousands of 
+particles per second.
+
+[Flow cytometry](https://en.wikipedia.org/wiki/Flow_cytometry) enables the 
+simultaneous measurement of 15, whereas 
+[mass cytometry (CyTOF)](https://en.wikipedia.org/wiki/Mass_cytometry) of as 
+many as 40 proteins per single cell.
+
+We start by downloading and reading in a CyTOF dataset. The dataset 
+comes from a single-cell mass cytometry study by 
+[Bendall et al.](http://science.sciencemag.org/content/332/6030/687.full)
+on differential immune drug responsed across human hematopoietic cells
+over time.
+
+```{r, warning=FALSE}
+download.file(url = "http://web.stanford.edu/class/bios221/data/Bendall_2011.fcs",
+              destfile = "Bendall_2011.fcs",mode = "wb")
+fcsB = read.FCS("Bendall_2011.fcs", truncate_max_range = FALSE)
+slotNames(fcsB)
+```
+
+**Quiz Question 6**: Look at the structure of the `fcsB` object (hint: the 
+`colnames` function). How many variables were measured? 
+
+```{r}
+colnames(fcsB) # 40 proteins
+```
+
+
+**Quiz Question 7**: How many cells were measured in the `fcsB` object? 
+(hint: use `exprs(fcsB)`).
+
+```{r}
+#exprs(fcsB)
+dim(fcsB) #91392
+```
+
+
+
+### Data preprocessing
+
+First we load the data table that reports the mapping between isotopes and 
+markers (antibodies); then, we replace the isotope names in the column 
+names of `fcsB` with the marker names. This is simply to make the subsequent 
+analysis and plotting code more readable.
+
+```{r}
+markersB = read_csv(url("http://web.stanford.edu/class/bios221/data/Bendall_2011_markers.csv"),show_col_types = FALSE)
+mt = match(markersB$isotope, colnames(fcsB))
+stopifnot(!any(is.na(mt)))
+colnames(fcsB)[mt] = markersB$marker
+```
+
+Below, we show how to plot the joint distribution of the cell lengths and 
+the `DNA191` (indicates the activity of the cell whether cell is dead or alive).
+The information is included in the `fcsB` object (of class `flowFrame`).
+
+```{r}
+flowPlot(fcsB, plotParameters = c("Cell_length", "DNA191"), logy=TRUE)
+```
+
+It is standard to transform both flow and mass cytometry data using one of 
+several special functions, we take the example of the inverse hyperbolic sine 
+(arcsinh), which serves as a variance stabilizing transformation. We'll learn more about these kinds of transformations in a future lab. 
+First, let's visualize the distribution of the untransformed raw data:
+
+```{r}
+# `densityplotvis()` is from `densityplot` package
+densityplot(~`CD3all`, fcsB)
+```
+
+To apply the transformation and to plot the data you can use functions
+from the `flowCore`` package. After the transformation the cells seem to 
+form two clusters: Based solely on one dimension (CD3all) we see two cell subsets 
+(the two modes).
+
+```{r}
+asinhT = arcsinhTransform(a = 0.1, b = 1)
+cols_to_transform <- setdiff(colnames(fcsB), c("Time", "Cell_length", "absoluteEventNumber"))
+trans1 = transformList(cols_to_transform, asinhT)
+fcsBT = transform(fcsB, trans1)
+densityplot(~`CD3all`, fcsBT)
+```
+
+Let's cluster cells into two groups using one-dimensional k-means filter.
+To learn more about the arguments of the functions type `?kmeansFilter`
+and `?flowCore::filter`
+
+```{r}
+kf = kmeansFilter("CD3all"=c("Pop1","Pop2"), filterId="myKmFilter")
+fres = filter(fcsBT, kf)
+summary(fres)
+```
+
+```{r}
+fcsBT1 = split(fcsBT, fres, population="Pop1")
+fcsBT2 = split(fcsBT, fres, population="Pop2")
+```
+
+**Quiz question 8**: How many dimensions (markers) does the above code use 
+to split the data into 2 cell subsets using kmeans?
+
+A Bioconductor package ``ggcyto`` build on top of ``ggplot2`` 
+includes functions for generating visualizations specifically
+for cytometry data. Note that here `fcsB` or `fcsBT` are not 
+'data.frames' but objects of class  'flowFrame'. This means
+that you cannot use `fcsB` and `fcsBT`  (without conversion to data.frame)
+as inputs to `ggplot()`. 'flowFrame' objects hold marker expression
+data and sample information data, so you can access any variables you need.
+
+```{r ggcytoCD4CD8}
+library("ggcyto")
+# Untransformed data
+ggcyto(fcsB,aes(x = CD4)) + geom_histogram(bins = 60) 
+```
+
+
+```{r}
+# Transformed data
+ggcyto(fcsBT, aes(x=CD4)) + geom_histogram(bins=90) 
+```
+
+```{r}
+# ggcyto automatic plotting
+autoplot(fcsBT, "CD4")
+```
+
+```{r}
+ggcyto(fcsBT, aes(x = CD4, y = CD8)) + geom_density2d(colour="black") 
+```
+
+```{r}
+ggcyto(fcsBT, aes(x = CD4, y = CD8)) + geom_hex(bins = 50) 
+```
+
+
+```{r}
+# ggcyto automatic plotting
+autoplot(fcsBT, "CD4", "CD8", bins = 50)
+```
+
+
+For more details on capabilities of `ggcyto` refer to the following
+[link](https://bioconductor.org/packages/release/bioc/vignettes/ggcyto/inst/doc/autoplot.html)
+
+## Density based clustering
+
+Data sets such as flow cytometry containing only a few markers and a large 
+number of cells are amenable to density clustering. DBSCAN algorithm looks for 
+regions of high density separated by sparse emptier regions. This method has 
+the advantage of being able to cope with clusters that are not necessarily 
+convex (i.e. not blob-shaped). One implementation of such a method is called 
+``dbscan``, let us look at an example by running the code below:
+
+```{r dbscanfcs5}
+library("dbscan")
+# Select a small subset of 5 protein markers
+mc5 = exprs(fcsBT)[, c("CD4", "CD8", "CD20", "CD3all", "CD56")]
+res5 = dbscan::dbscan(mc5, eps = .65, minPts = 30)
+mc5df = data.frame(mc5)
+mc5df$cluster = as.factor(res5$cluster)
+```
+
+
+**Quiz question 9**: How many clusters did `dbscan()` find?
+```{r}
+levels(mc5df$cluster) #8
+```
+
+
+**Quiz question 10**: How many cells were clustered into cluster 3
+by `dbscan()`?
+
+```{r}
+
+nrow(subset(mc5df, cluster == "3")) #4616
+```
+
+
+
+We can now generate a CD8-vs-CD4 2d-density plot for the cells colored
+by their assigned cluster labels, computed by `dbscan()`:
+
+```{r}
+ggplot(mc5df, aes(x = CD4, y = CD8, colour = cluster)) + 
+  geom_density2d(bins = 7, contour_var = "ndensity")
+```
+
+And do the same for CD3all and CD20 markers:
+
+```{r}
+ggplot(mc5df,aes(x = CD3all, y = CD20, colour = cluster))+ geom_density2d(bins = 7, contour_var = "ndensity")
+```
+
+Observe that **the nature of the clustering is multidimensional**,
+as the projections into two dimensions show overlapping clusters.
+
+## Validating and choosing the number of clusters
+
+The clustering methods we have described are tailored to deliver the best 
+grouping of the data under various constraints. What happens, though, when there are no groups to speak of?  It is important to remember that a clustering algorithm will always deliver 
+groups, even if there are none in truth. In particular, when performing
+kmeans clustering, we have to set the 'k' parameter (for the number
+of clusters to group observations into) ahead of time. What choice of 'k'
+is valid?
+
+Here we want to illustate the use of the "wss" (within sum of squares) statistic 
+to evaluate the quality of a clustering. Note that as $k$ (number of cluster for 
+k-means algorithm) increases, wss will also decrease. We simulate data coming 
+from 4 groups. In particular, we generate 2-dimensional observations
+(as if there were only 2 proteins measured for each cell). The four groups
+are generated from 2-d multivariate normals with centers at
+$\mu_1 = (0, 0)$, $\mu_2 = (0, 8)$, $\mu_3 = (8, 0)$, $\mu_4 = (8, 8)$.
+In this simulation, we know the ground truth (4 groups), but we will
+try to cluster the data using the `kmeans` algorithm with different choices for the 'k'
+parameter. We will see how the wss statistic varies as we vary `k`.
+
+Here we again use the `%>%` operator from the ``dplyr`` package (if you do not 
+understand the code, try to see what `simul4` contains and repeat the same using
+code that does not use the `%>%` operator).
+
+```{r Fake4}
+simul4 = lapply(c(0,8), function(x){
+  lapply(c(0,8), function(y){
+    data.frame(x = rnorm(100, x, 2),
+               y = rnorm(100, y, 2), 
+               class = paste(x, y, sep = "")
+    )
+  }) %>% do.call(rbind,.)
+}) %>% do.call(rbind,.)
+```
+
+```{r}
+ggplot(simul4, aes(x = x, y = y)) +
+  geom_point(aes(color = class), size = 2)
+```
+
+
+
+```{r}
+# Compute the kmeans within group wss for k=1 to 12
+wss = rep(0,8)
+# for a single cluster the WSS statistic is just sum of squares of centered data
+wss[1] = sum(apply(scale(simul4[,1:2], scale = F), 2, function(x){ x^2 }))
+# for k = 2, 3, ... we perform kmeans clustering and compute the associated WSS statistic
+for (k in 2:8) {
+  km4 <- kmeans(simul4[,1:2],k)
+    wss[k] =  sum(km4$withinss)
+}
+# Now, we are ready to plot the computed statistic:
+ggplot(data.frame(k = 1:length(wss), wss = wss)) +
+  geom_point(aes(x = k, y = wss), color = "blue", size= 3) +
+  xlab('k') + ylab('WSS(k)')
+```
+
+**Quiz Question 11**: Why don't we choose $k$ to minimize the wss statistic?
+
+For the within sum of squares (wss) statistic, we see that the last substantial decrease
+of the statistic occurres before $k=4$, and for values $k = 5, 6, \dots$
+the quantity 'levels-off'. In practice, we would choose $k=4$, a value
+happening at the 'elbow' of the plot (elbow-rule). Of course this choice is 
+still somewhat subjective. The book chapter describes additional ways of
+choosing `k` (e.g. the gap statistic).
+
+
+## Hierarchical clustering
+
+The Morder data are gene expression measurements for 156 genes on T cells of 
+3 types (naïve, effector, memory) from 10 patients (Holmes et al. 2005).
+Here we load the `Morder` data.frame from the online directory.
+
+```{r}
+load(url("http://web.stanford.edu/class/bios221/data/Morder.RData"))
+dim(Morder)
+```
+
+In 'base' R a function to perform hierarchical clustering is `hclust()`.
+To cluster the genes with hierarchical clustering you first need
+to compute a distance matrix storing all pairwise (gene-to-gene)
+dissimilarities. The following commands would be useful:
+
+
+```{r, fig.width=15, fig.height=8}
+D <- dist(t(Morder))
+gene_clust <- hclust(d = D)
+plot(gene_clust)
+```
+
+
+In class, you saw that in hierarchical clustering one needs to choose
+the method for agglomerating the clusters. By default `hclust()`
+uses a "complete" linkage method. Please redo hierarchical clustering
+with the "ward.D2" method. Note that in the `hclust()` that there are "ward.D"
+and "ward.D2" methods available. Please call `?hclust` to read
+about the difference between the two methods.
+
+```{r}
+# Your code:
+D <- dist(t(Morder))
+gene_clust <- hclust(d = D, method = "ward.D2")
+plot(gene_clust)
+```
+
+**Quiz question 12**: Note that the height of the dendrogram is changed when
+you redid the clustering with a different linkage method. What do the y-axis 
+values on the hclust dendrogram plot correspond to?
+
+Now, instead of clustering genes, apply hierarchical clustering
+for samples (observations), with the default linkage method.
+
+```{r}
+# we don't transpose the matrix now (samples are rows)
+D_samples <- dist(Morder)
+sample_clust <- hclust(d = D_samples)
+plot(sample_clust)
+abline(h =12)
+```
+
+
+**Quiz Question 13**: How many clusters of samples are there at the dendrogram 
+height of 12. Hint: the `abline()` function might be helpful.
+# 3
+
+**Quiz Question 14**: Match the clustering method to the properties described (see Canvas).
+
+Now that you know how to perform hierarchical clustering, use `pheatmap()`
+to generate a heatmap with rows and columns grouped according
+to computed dendrograms. 
+
+```{r fig.height=10, fig.width=8}
+library(pheatmap)
+pheatmap(Morder, fontsize_col=12, fontsize_row = 15) 
+```
+
+
+**Quiz Question 15**: In `pheatmap` you can specify what distance metric to 
+compute for clustering rows and columns. What type of distance does `pheatmap`
+use by default?
+
+**Quiz Question 16**: What type of clustering (agglomeration) method does
+`pheatmap` use by default?

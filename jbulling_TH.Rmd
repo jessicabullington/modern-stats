@@ -7,7 +7,18 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+pkgs_needed = c("dplyr", "ggplot2", "ggbeeswarm", "pasilla", "DESeq2")
+pkg2install = setdiff(pkgs_needed, installed.packages())
+if(length(pkg2install) > 0) BiocManager::install(pkg2install)
 ```
 
-# write code that makes me happy
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(ggbeeswarm)
+```
+
+
+## Question 1
+
 

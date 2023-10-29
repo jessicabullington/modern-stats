@@ -1,0 +1,252 @@
+---
+title: 'Assignment: Testing and Graphics'
+author: 'Bios 221: Modern Statistics for Modern Biology'
+date: "Fall 2023, Due 10/29/2023" 
+output: 
+  BiocStyle::html_document
+toc: false
+number_sections: false
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pkgs_needed = c("dplyr", "ggplot2", "ggbeeswarm", "pasilla", "DESeq2")
+pkg2install = setdiff(pkgs_needed, installed.packages())
+if(length(pkg2install) > 0) BiocManager::install(pkg2install)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(ggbeeswarm)
+```
+
+## Instructions {.unnumbered}
+
+In this take home assignment you will practice hypothesis testing
+and generating useful graphics.
+
+You should write your answers in either an ``Rmd`` (R markdown) 
+or a ``qmd`` (quarto) document, 
+then compile it into an output report (either a ``.pdf`` or ``.html`` file format) for submission in canvas by uploading both the ``Rmd`` and the ``html`` or ``pdf`` files, please call your files ``sunetid_TH.pdf`` where ``sunetid`` is replaced by yours.
+
+The assignment will be graded based on the correctness of your answers, 
+the quality of your explanations and the aesthetics of your plots, 
+the readability of your code and the documentation of your use of chatGPT. 
+
+Feel free to work on this assignment during the Labs (you can also ask for help from the TAs during this time if you have trouble understanding some of the questions).
+
+Please use ``ggplot2`` for plotting. When using ```ChatGPT``` please provide the prompt you use and comment on the answer, 5 bonus points if you document
+a mistake it makes (limited to 2 mistakes).
+
+## Question 1: False Discovery Proportion {.unnumbered}
+
+We are interested in testing the null hypothesis $H_0: \theta = 0$ against the alternative $H_1: \theta \neq 0$. For each $w = 0.05, 0.1, 0.15, 0.2, ...., 0.9$ generate $n = 10,000$ test-statistics among which $(1-w)n$ are drawn from $N(\theta_i, 1)$, where $\theta_i \sim N(0, 2)$, and the rest are drawn from $N(0, 1)$. 
+(Hint: In fact you are drawing from a mixture of two different normals).
+
+### (a)  How many of the null hypotheses are true according to this method of simulation? {.unnumbered}
+
+### (b) Calculate the corresponding p-value and reject the null hypothesis if the p-value falls below $\alpha = 0.05$. {.unnumbered}
+
+Also calculate the false discovery proportion for each $w$. Visualize the results with $w$ on the x-axis and the proportion of false discoveries on the y-axis. 
+
+### (c) Describe what you observe. Is this result to be expected? Does it depend on the choice of $\theta$? {.unnumbered}
+
+
+### (d) [Berger, Sellke (1987)](https://www2.stat.duke.edu/courses/Spring07/sta215/lec/BvP/BergSell1987.pdf) write that "... like it or not, people do hypothesis testing to obtain evidence as to whether or not the hypootheses are true ...". {.unnumbered}
+
+Do p-values provide the answer that these people are looking for?
+
+
+## Question 2: Beta Uniform Mixture Model {.unnumbered}
+
+In chapter 4, we discussed mixture models. In this question, we consider a mixture model for the distribution of p-values based on  signal and  noise components. We assume that the signal is $B(a, 1)$ distributed while the noise is $B(1, 1) = U(0, 1)$ distributed. This mixture model is also called a Beta-Uniform Mixture Model. 
+
+### (a) Explain why the noise component is modeled by $B(1, 1)$. {.unnumbered}
+
+Back up your answer by a simulation similar to the one you did in the previous question.
+
+
+### (b) In a Beta-Uniform mixture model, the p-values are modeled as $f(x|a, \pi_0) = \pi_0 + (1-\pi_0)ax^{a-1}$ for $0 < x \leq 1$ and $0 < a < 1$. {.unnumbered}
+
+Specifically, the p-values are fit with a uniform component from the null with probability $\pi_0$ and a beta distribution proportional to $ax^{a-1}$. In the simulation setting of the previous question, suppose that 3,000 out of the 10,000 hypotheses are false. Use the function `fitBumModel` from the Bioconductor `BioNet` package to fit a Beta-Uniform mixture model to your p-values (set the parameter `plot = TRUE`). Interpret the results.
+
+*[Note: You might get a warning on gene names. Here, we have simulated p-value and no gene names, so you can just ignore this warning.]*
+
+
+
+### (c) Say we declare significance at a certain p-value $\tau$. {.unnumbered}
+
+Then, the estimated density based on a beta-uniform mixture model can be partitioned into four different areas. (You can think about adding a vertical line corresponding to $\tau$ to the histogram in the previous question to get a better idea of the four different areas). Describe the four possible outcomes and assign them to each of the four areas under the curve. 
+
+### (d) The parameters of a Beta-Uniform Mixture Model are fit via Maximum Likelihood. {.unnumbered}
+
+Let $\hat{\pi}_0$ and $\hat{a}$ denote the estimates. Further, let $\hat{F}(\tau) = \hat{\pi}_0 \tau + (1 - \hat{\pi}_0) \tau^{\hat{a}}$. Based on these quantities, describe how would you estimate the False Discovery Rate.
+
+### (e) Can you think of a certain type of test for which p-values are likely not going to follow a Beta-Uniform distribution? Explain your reasoning. {.unnumbered}
+
+
+## Question 3 : Correlated observations when testing for differences. {.unnumbered}
+
+In this exercise we will explore the effect of the violation of independence of measurements.
+    
+###  (a) Write code that creates two samples of n=10 data points from the same  distributions with the same mean (m1) and same standard deviation sigma1, and run a t-test on the difference in means. Now we are going to modify how we create each of these two samples of ten points and make each set of 10 points correlated, for instance as longitudinal data would be.     { .unnumbered}
+
+To do this, we write a function that, given a correlation, $\rho$, generates 10 points such that each new point has $\rho$ correlation with the  previous point and the original point is from a Normal(m1,sigma1). You can do this by sampling each new point `x[i]` as `(rho) * x[i-1] + (1-rho) * new_points`, 
+with `x[1]` a random normal with mean m1  and standard deviation sigma1 the `new_points` as a random normal(0,1).
+
+(Hint: So you start with a random point from the right distribution, then create sequentially the 9 next points, then do this again separately for the second sample).
+    
+### (b) Simulate two samples and do the test an appropriate number of times (B=10,000) and keep track of the false positive rate for a range of 20 values of $\rho$ from 0 to 1. {.unnumbered}
+    
+### (c) What happens as rho approaches 0? What happens as rho approaches 1? {.unnumbered}
+
+### (d) Using the results of part (c), generate an appropriate visualization that shows false positive rate as we vary rho.     { .unnumbered}
+(Hint : Make a ggplot2 visualization with a horizontal line at 0.05.)
+    
+### (Bonus, open-ended) Suppose instead of using a t-test we use a permutation test. Do you think that this will address the issue? How do you think the two would compare? Show simulations or reasoning to support your answer. {.unnumbered}
+    
+
+## Question 4: Is Hypothesis filtering p-value hacking? {.unnumbered}
+
+In this section we want to illustrate that p-value hacking can sometimes be 
+very nuanced. In class and in the book, we discuss "Independent Filtering", i.e.
+a process in which instead of applying a multiple testing to all hypotheses, 
+one first remove some hypotheses ("filter them out") based on some 
+**independent criterion** (not related to the hypothesis being tested) 
+and thus hope to increase power.
+
+However, during the early 2000s, "filtering" (also called "screening") was 
+a debated topic. Some people claimed it was OK to do so (and in fact encouraged
+it), while others considered it to be equivalent to p-value hacking. 
+The actual answer is that **filtering might be statistical valid or not 
+depending on the filtering statistic used!** Here we will explore this through 
+simulations.
+
+You can also read the paper which provides a clarification on this topic.
+
+[Independent filtering increases detection power for high-throughput experiments.](http://www-huber.embl.de/pub/pdf/Bourgon_PNAS_2010.pdf) 
+Richard Bourgon, Robert Gentleman and Wolfgang Huber. 
+Proceedings of the National Academy of Sciences 107.21 (2010): 9546-9551.
+
+### (a) $t$-test simulation {.unnumbered}
+
+Write a small function that implements a null simulation:
+
+Draw 5 observations from a $\mathcal{N}(0,1)$ distribution and 5 additional
+observations from a $\mathcal{N}(0,1)$ distribution. Now run a $t$-test using 
+the function ``t.test`` (should you use ``var.equal = TRUE`` here?) to compare 
+the means of the two groups. Your function should return the p-value. To test 
+your function, run it 1000 times and plot the resulting histogram. The
+distribution of p-values you obtain should be approximately uniform!
+
+
+### (b) Between-group and sample variance {.unnumbered}
+
+A simple idea for reducing the number of tests (and thus gain power) in a 
+hypothesis screening scenario is to only keep tests for which the data show 
+sufficient "variability". You can think of each of these 1000 tests as having 
+been performed on one of the 1000 genes in an attempt to screen for those 
+that are differentially expressed. (In the simulation above, no 
+gene is truly differentially expressed, and that's fine since we are after
+understanding the null situation, as a prequisite for finding signal once there 
+are indeed some of the genes differentially expressed.)
+
+For genes that show low variability overall, we are unlikely to be able to 
+detect any differences between groups, hence we might want to remove them before 
+doing any multiple testing. But is this statistically valid? The answer is that 
+it depends on what we mean by "variability". We will make the word "variability" 
+more precise in two different ways:
+
+Above, in each simulations we had $n_1 = n_2 = 5$ observations for the two groups. 
+Let $m_1$ and $m_2$ be the sample averages within the two groups. Also let $m$ 
+be the global mean (in this case this happens to be the mean of $m_1$ and 
+$m_2$ since we have the same number of observation in both groups).
+Now the between-group-variance is defined as follows:
+
+$$s_{\text{between}}^2 = n_1 (m_1-m)^2 + n_2 (m_2-m)^2$$
+
+Next, consider the (global) sample variance $s_{\text{sample}}^2$, which we get 
+by ignoring the group-assignment of the different observations 
+(i.e. ``var(c(obs1, obs2))``,  where ``obs1`` are the measurements from group 
+1 and ``obs2`` those from group 2.
+
+Now, modify your function from (a) to return not only the p-value, but also the
+between-group variance $s_{\text{between}}^2$ and the sample variance 
+$s_{\text{sample}}^2$.
+
+
+
+### (c) Filtering {.unnumbered}
+
+Use your function from above again to generate 10000 simulations. The p-value 
+histogram should still be uniform.
+
+### Next you will "filter" your dataset in 2 different ways. {.unnumbered}
+
+ - 1. Keep only the 50% of the genes with the highest between-group variance and plot the histogram of their p-values.
+ - 2. Keep only the 50% of the genes with the highest sample variance (which ignores labels) and plot their p-value histogram. Then, plot the distribution of the p-values for the data filtered as specified by method 1, and then as method 2.
+
+ What do you observe? 
+
+ Would Method 1 of filtering be valid for subsequent multiple testing? What about Method 2?
+
+### (d) Filtering and power (bonus -- not required) {.unnumbered}
+
+Here we will see that filtering can increase power.
+
+* Write a function as in part (b) but this time simulating under 
+a different alternative: 
+Take 5 observations ${\it N}(0,1)$ and 5 observations ${\it N}(2,1)$ 
+and apply a $t$-test to these.
+
+* Generate 1000 simulations under the above alternative (using your function) 
+and merge the result to your 10000 simulations from part (b) to get a total of 
+11000 simulations. 
+
+* Apply Benjamini-Hochberg multiple testing p-value adjustment to the whole 
+dataset. How many rejections do you make at the level $\alpha$=0.1? 
+Make a histogram of all the adjusted p-values.
+
+* Now proceed as in part (c) and retain (from the whole dataset of 11000 genes)
+only 50% of the genes with the highest between-group or sample variance,
+i.e. follow the procedure described in part(c). Next, apply Benjamini-Hochberg 
+to the retained (unadjusted) p-values. How many rejections do you get now?
+Plot a histogram of the obtained adjusted p-values for the filered dataset. 
+What happened to the p-values? How did the distribution due to filtering change?
+
+
+## Question 5: Data Analysis {.unnumbered}
+
+For this problem, we use the ‘covid.csv’ that you must download  from Canvas (it sits in the Assignment folder). The data is collected from _Covid Act Now API_.
+
+### (a) Summarizing Data: {.unnumbered}
+
+Import and provide a summary of the dataset. What is the maximum recorded  daily new case count for each state? What is the maximum recorded state vaccination initiated ratio? 
+
+
+### (b) Filtering and Normalization: {.unnumbered}
+
+* Filter to only the data corresponding to the states New York (NY), California (CA), Idaho (ID), and Florida (FL). How many dates are recorded in all $4$ states? Filter to only the data whose dates are recorded in all $4$ states. 
+
+
+* Normalize the daily new deaths by the states' population and calculate cases per 100,000. Note that the daily counts are bumpy and demonstrate weekly patterns (large on weekdays and small on weekends). Compute the $7$-day moving average for cases and deaths per 100,000. Hint: the function _rollmean_ in the _zoo_ package may be helpful. See here (https://www.storybench.org/how-to-calculate-a-rolling-average-in-r/) and here (https://www.rdocumentation.org/packages/zoo/versions/1.8-9/topics/rollmean) for examples.
+
+
+### (c) Visualization with Selected States {.unnumbered}
+
+* Let's visualize the new cases and new deaths using ridgeline plots. Ridgeline plots are partially overlapping line plots that create the impression of a mountain range. They can be quite useful for visualizing changes over time and space. We will use the package `ggridges` for ridgeline plots. Plot the averaged new cases using `geom_ridgeline` and comment on the peaks. (The comment is open-ended and any plausible answers are accepted.)
+
+* Plot the new deaths using `geom_ridgeline`, compare with the new cases, and comment. (The comment is open-ended and any plausible answers are accepted.)
+
+
+### (d) More Visualization - Clustering {.unnumbered}
+
+* Now let's explore clustering between states. Subset the data frame to about 10 states of personal interest to you. Then do a little data cleaning: limit the data to only those with no missing data on the metrics.caseDensity variable. Find the mean monthly smoothed cases (mean of metrics.caseDensity by month) for each state. 
+
+* Next, perform clustering on your chosen states for their mean monthly smoothed cases. In ‘base’ R a function to perform hierarchical clustering is hclust(). To cluster states with hierarchical clustering you first need to compute a distance matrix storing all pairwise dissimilarities. Filter your data as needed to make the plot readable (e.g. consider only clustering states in 2021, or by certain seasons- you can decide based on what seems interesting to you!). Make some observations about your resulting plot- which states and time periods are most similar? 
+
+
+
+
