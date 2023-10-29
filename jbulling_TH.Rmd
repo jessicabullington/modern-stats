@@ -1,0 +1,13 @@
+---
+title: "jbulling_TH"
+author: "Jessica Bullington"
+date: "2023-10-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# write code that makes me happy
+
