@@ -103,15 +103,28 @@ fl = subset(covid_subset, state == "FL")
 
 dates_in_all_4 = intersect(intersect(ny$date, ca$date), intersect(id$date, fl$date))
 
-covid_sub2 = subset(covid_subset, date %in% dates_in_all_4)
+covid_subset_2 = subset(covid_subset, date %in% dates_in_all_4)
 
-
+# check that date counts are now equal
+dates_in_subset_2 = dplyr::group_by(covid_subset_2, state) %>% 
+  dplyr::summarize(num.dates = n())
 
 ```
 
 
 
 * Normalize the daily new deaths by the states' population and calculate cases per 100,000. Note that the daily counts are bumpy and demonstrate weekly patterns (large on weekdays and small on weekends). Compute the $7$-day moving average for cases and deaths per 100,000. Hint: the function _rollmean_ in the _zoo_ package may be helpful. See here (https://www.storybench.org/how-to-calculate-a-rolling-average-in-r/) and here (https://www.rdocumentation.org/packages/zoo/versions/1.8-9/topics/rollmean) for examples.
+
+Note: I am assuming that we used the filtered dataset.
+
+```{r}
+# normalize daily new deaths by population
+covid_subset_2$deaths_per_100k = covid_subset_2$actuals.newDeaths / covid_subset_2$population * 100000
+
+# calculate cases per 100,000
+covid_subset_2$cases_per_100k = covid_subset_2$actuals.newCases / covid_subset_2$population * 100000
+```
+
 
 
 ### (c) Visualization with Selected States {.unnumbered}
