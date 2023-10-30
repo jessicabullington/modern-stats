@@ -19,6 +19,114 @@ library(ggbeeswarm)
 ```
 
 
-## Question 1
+## Question 1: False Discovery Proportion {.unnumbered}
+
+We are interested in testing the null hypothesis $H_0: \theta = 0$ against the alternative $H_1: \theta \neq 0$. For each $w = 0.05, 0.1, 0.15, 0.2, ...., 0.9$ generate $n = 10,000$ test-statistics among which $(1-w)n$ are drawn from $N(\theta_i, 1)$, where $\theta_i \sim N(0, 2)$, and the rest are drawn from $N(0, 1)$. 
+(Hint: In fact you are drawing from a mixture of two different normals).
+
+### (a)  How many of the null hypotheses are true according to this method of simulation? {.unnumbered}
+
+### (b) Calculate the corresponding p-value and reject the null hypothesis if the p-value falls below $\alpha = 0.05$. {.unnumbered}
+
+```{r}
+#set seed
+set.seed(123)
+n = 10000
+
+```
+
+
+Also calculate the false discovery proportion for each $w$. Visualize the results with $w$ on the x-axis and the proportion of false discoveries on the y-axis. 
+
+### (c) Describe what you observe. Is this result to be expected? Does it depend on the choice of $\theta$? {.unnumbered}
+
+
+### (d) [Berger, Sellke (1987)](https://www2.stat.duke.edu/courses/Spring07/sta215/lec/BvP/BergSell1987.pdf) write that "... like it or not, people do hypothesis testing to obtain evidence as to whether or not the hypootheses are true ...". {.unnumbered}
+
+Do p-values provide the answer that these people are looking for?
+
+
+
+## Question 5: Data Analysis {.unnumbered}
+
+For this problem, we use the ‘covid.csv’ that you must download  from Canvas (it sits in the Assignment folder). The data is collected from _Covid Act Now API_.
+
+### (a) Summarizing Data: {.unnumbered}
+
+Import and provide a summary of the dataset. What is the maximum recorded  daily new case count for each state? What is the maximum recorded state vaccination initiated ratio? 
+
+```{r}
+# import data
+covid = read.csv("covid.csv")
+
+# summary of data
+summary(covid)
+
+# max daily new case count for each state
+max_daily_new_cases = dplyr::group_by(covid, state) %>% 
+  dplyr::summarize(max_daily_new_cases = max(actuals.newCases, na.rm = T))
+
+max_daily_new_cases
+
+# max recorded state vaccination initiated ratio
+max_vaccination_ratio = max(covid$metrics.vaccinationsInitiatedRatio, na.rm = T)
+
+max_vaccination_ratio
+
+#  max recorded state vaccination initiated ratio for each state
+max_vaccination_ratio_by_state = dplyr::group_by(covid, state) %>% 
+  dplyr::summarize(max_vaccination_ratio = max(metrics.vaccinationsInitiatedRatio, na.rm = T))
+
+max_vaccination_ratio_by_state
+
+```
+
+
+
+### (b) Filtering and Normalization: {.unnumbered}
+
+* Filter to only the data corresponding to the states New York (NY), California (CA), Idaho (ID), and Florida (FL). How many dates are recorded in all $4$ states? Filter to only the data whose dates are recorded in all $4$ states. 
+
+```{r}
+# filter to only NY, CA, ID, and FL
+covid_subset = subset(covid, state %in% c("NY", "CA", "ID", "FL"))
+
+# count dates recorded in all 4 states
+dates_in_subset = dplyr::group_by(covid_subset, state) %>% 
+  dplyr::summarize(num.dates = n())
+
+# filter to dates recorded in all 4 states
+ny = subset(covid_subset, state == "NY")
+ca = subset(covid_subset, state == "CA")
+id = subset(covid_subset, state == "ID")
+fl = subset(covid_subset, state == "FL")
+
+dates_in_all_4 = intersect(intersect(ny$date, ca$date), intersect(id$date, fl$date))
+
+covid_sub2 = subset(covid_subset, date %in% dates_in_all_4)
+
+
+
+```
+
+
+
+* Normalize the daily new deaths by the states' population and calculate cases per 100,000. Note that the daily counts are bumpy and demonstrate weekly patterns (large on weekdays and small on weekends). Compute the $7$-day moving average for cases and deaths per 100,000. Hint: the function _rollmean_ in the _zoo_ package may be helpful. See here (https://www.storybench.org/how-to-calculate-a-rolling-average-in-r/) and here (https://www.rdocumentation.org/packages/zoo/versions/1.8-9/topics/rollmean) for examples.
+
+
+### (c) Visualization with Selected States {.unnumbered}
+
+* Let's visualize the new cases and new deaths using ridgeline plots. Ridgeline plots are partially overlapping line plots that create the impression of a mountain range. They can be quite useful for visualizing changes over time and space. We will use the package `ggridges` for ridgeline plots. Plot the averaged new cases using `geom_ridgeline` and comment on the peaks. (The comment is open-ended and any plausible answers are accepted.)
+
+* Plot the new deaths using `geom_ridgeline`, compare with the new cases, and comment. (The comment is open-ended and any plausible answers are accepted.)
+
+
+### (d) More Visualization - Clustering {.unnumbered}
+
+* Now let's explore clustering between states. Subset the data frame to about 10 states of personal interest to you. Then do a little data cleaning: limit the data to only those with no missing data on the metrics.caseDensity variable. Find the mean monthly smoothed cases (mean of metrics.caseDensity by month) for each state. 
+
+* Next, perform clustering on your chosen states for their mean monthly smoothed cases. In ‘base’ R a function to perform hierarchical clustering is hclust(). To cluster states with hierarchical clustering you first need to compute a distance matrix storing all pairwise dissimilarities. Filter your data as needed to make the plot readable (e.g. consider only clustering states in 2021, or by certain seasons- you can decide based on what seems interesting to you!). Make some observations about your resulting plot- which states and time periods are most similar? 
+
+
 
 
