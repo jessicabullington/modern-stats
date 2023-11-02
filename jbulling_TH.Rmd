@@ -6,13 +6,16 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE,cache = TRUE)
 pkgs_needed = c("dplyr", "ggplot2", "ggbeeswarm", "pasilla", "DESeq2")
 pkg2install = setdiff(pkgs_needed, installed.packages())
 if(length(pkg2install) > 0) BiocManager::install(pkg2install)
 ```
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
+# clear workspace
+rm(list = ls())
+
 library(ggplot2)
 library(dplyr)
 library(ggbeeswarm)
@@ -26,24 +29,533 @@ We are interested in testing the null hypothesis $H_0: \theta = 0$ against the a
 
 ### (a)  How many of the null hypotheses are true according to this method of simulation? {.unnumbered}
 
+n*w
+
 ### (b) Calculate the corresponding p-value and reject the null hypothesis if the p-value falls below $\alpha = 0.05$. {.unnumbered}
-
-```{r}
-#set seed
-set.seed(123)
-n = 10000
-
-```
-
 
 Also calculate the false discovery proportion for each $w$. Visualize the results with $w$ on the x-axis and the proportion of false discoveries on the y-axis. 
 
+
+```{r}
+set.seed(3)
+alpha = 0.05
+n = 10000
+w_values = seq(0.05, 0.9, 0.05)
+
+thetas = numeric()
+fdr = numeric()
+
+for (i in 1:length(w_values)) {
+  
+  w = w_values[i]
+  
+  # Model null hypothesis
+  # result should be not to reject null, so rejects from here are false positives and non-rejects are true negatives
+  n_null = n * w
+  null = rnorm(n_null, mean = 0, sd = 1) 
+  p_null = 2 * (1 - pnorm(abs(null))) # two-tailed
+  rejects_null = p_null <= alpha
+
+  # Model alternative hypothesis
+  # result should be to reject null, so rejects from here are true positives and non-rejects are false negatives
+  theta = rnorm(1, mean = 0, sd = sqrt(2))
+  thetas[i] = theta # save theta to see if it makes a difference
+  n_alt = round(n * (1 - w))
+  alt = rnorm(n_alt, mean = theta, sd = 1) 
+  p_alt = 2 * (1 - pnorm(abs(alt)))
+  rejects_alt = p_alt <= alpha
+
+  # Calculate FDR (the false rejects divided by total rejects)
+  fdr[i] = sum(rejects_null) / (sum(rejects_null) + sum(rejects_alt))
+}
+
+# plot FDR by w
+library(viridis)
+ggplot(data.frame(w_values, fdr, thetas), aes(x = w_values, y = fdr, col = abs(thetas))) +
+  geom_point() +
+  geom_line(col = "grey") +
+  scale_color_viridis(direction = -1) +
+  labs(x = "w", y = "FDR") +
+  theme_bw()
+
+```
+
 ### (c) Describe what you observe. Is this result to be expected? Does it depend on the choice of $\theta$? {.unnumbered}
+
+The FDR generally increases as the proportion of test statistics from the null (w) increases. This is expected because false positives are when the null is rejected incorrectly. Additionally, the mean of the alternative distribution (theta) does have an effect on FDR. When theta is closer to zero (the null), there are more false negatives, so fewer total rejects and a higher FDR (yellow points in the first plot).
 
 
 ### (d) [Berger, Sellke (1987)](https://www2.stat.duke.edu/courses/Spring07/sta215/lec/BvP/BergSell1987.pdf) write that "... like it or not, people do hypothesis testing to obtain evidence as to whether or not the hypootheses are true ...". {.unnumbered}
 
 Do p-values provide the answer that these people are looking for?
+
+No, p-values are not the probability that the null hypothesis is true. They are the probability of observing a test statistic as extreme or more extreme than the one observed, given that the null hypothesis is true. This is not the same as the probability that the null hypothesis is true.
+
+
+## Question 2: Beta Uniform Mixture Model {.unnumbered}
+
+In chapter 4, we discussed mixture models. In this question, we consider a mixture model for the distribution of p-values based on  signal and  noise components. We assume that the signal is $B(a, 1)$ distributed while the noise is $B(1, 1) = U(0, 1)$ distributed. This mixture model is also called a Beta-Uniform Mixture Model. 
+
+### (a) Explain why the noise component is modeled by $B(1, 1)$. {.unnumbered}
+
+Back up your answer by a simulation similar to the one you did in the previous question.
+
+The noise component is modeled by B(1,1) = U(0,1) because p-values under the null hypothesis are expected to be uniformly distributed between 0 and 1.
+
+
+```{r}
+# Set the number of simulated p-values
+n <- 10000
+
+# Simulate p-values from the noise component (Beta(1, 1))
+noise <- rbeta(n, shape1 = 1, shape2 = 1)
+noise_pvalues = 1 - pbeta(noise, shape1 = 1, shape2 = 1) # one tailed
+
+# Simulate p-values from a uniform distribution (Uniform(0, 1))
+uniform <- runif(n)
+uniform_pvalues = 1 - punif(uniform)
+
+
+# Create histograms to visualize the distributions
+hist(noise_pvalues, breaks = 30, main = "Distribution of Noise P-values", xlab = "P-value")
+hist(uniform_pvalues, breaks = 30, main = "Distribution of Uniform P-values", xlab = "P-value", col = "lightblue")
+
+```
+
+
+### (b) In a Beta-Uniform mixture model, the p-values are modeled as $f(x|a, \pi_0) = \pi_0 + (1-\pi_0)ax^{a-1}$ for $0 < x \leq 1$ and $0 < a < 1$. {.unnumbered}
+
+Specifically, the p-values are fit with a uniform component from the null with probability $\pi_0$ and a beta distribution proportional to $ax^{a-1}$. In the simulation setting of the previous question, suppose that 3,000 out of the 10,000 hypotheses are false. Use the function `fitBumModel` from the Bioconductor `BioNet` package to fit a Beta-Uniform mixture model to your p-values (set the parameter `plot = TRUE`). Interpret the results.
+
+*[Note: You might get a warning on gene names. Here, we have simulated p-value and no gene names, so you can just ignore this warning.]*
+
+```{r}
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install("BioNet")
+```
+
+```{r}
+set.seed(21)
+
+# Set the number of simulated p-values
+n_noise = 7000
+n_signal = 3000
+
+# Set the value of a (the shape parameter of the signal Beta distribution)
+a = 0.5 # where is this from?
+
+# Simulate p-values from the noise component (Beta(1, 1))
+noise <- rbeta(n_noise, shape1 = 1, shape2 = 1)
+noise_pvalues = pbeta(noise, shape1 = 1, shape2 = 1)
+
+# Simulate p-values from the signal component (Beta(a, 1))
+signal <- rbeta(n_signal, shape1 = a, shape2 = 1)
+signal_pvalues = pbeta(signal, shape1 = 1, shape2 = 1)
+
+# Load the BioNet package
+library(BioNet)
+
+# Combine the p-values from the noise and signal components
+all_pvalues <- c(noise_pvalues, signal_pvalues)
+
+# Fit the Beta-Uniform mixture model using the fitBumModel function
+fit <- fitBumModel(x = all_pvalues, plot = TRUE) 
+
+# Interpret the results
+print(fit)
+
+```
+
+
+### (c) Say we declare significance at a certain p-value $\tau$. {.unnumbered}
+
+Then, the estimated density based on a beta-uniform mixture model can be partitioned into four different areas. (You can think about adding a vertical line corresponding to $\tau$ to the histogram in the previous question to get a better idea of the four different areas). Describe the four possible outcomes and assign them to each of the four areas under the curve. 
+
+The bottom left quadrant (significant p-value but drawn from the null hypothesis) is a false positive. The top left quadrant (significant p-value and drawn from the alternative hypothesis) is a true positive. The bottom right quadrant (non-significant p-value but drawn from the null hypothesis) is a true negative. The top right quadrant (non-significant p-value but drawn from the alternative hypothesis) is a false negative.
+
+### (d) The parameters of a Beta-Uniform Mixture Model are fit via Maximum Likelihood. {.unnumbered}
+
+Let $\hat{\pi}_0$ and $\hat{a}$ denote the estimates. Further, let $\hat{F}(\tau) = \hat{\pi}_0 \tau + (1 - \hat{\pi}_0) \tau^{\hat{a}}$. Based on these quantities, describe how would you estimate the False Discovery Rate.
+
+The false discovery rate is the number of false positives over the total number of positives, which is the same as the total number of positives minus the number of true positives over the total number of positives. The total number of positives is the number of p-values above $\tau$, which is $\hat{F}(\tau)$. The number of true positives is the number of p-values above $\tau$ that are drawn from the alternative hypothesis, which is $\hat{F}(\tau) - \hat{\pi}_0 \tau$. Therefore, the false discovery rate is $\frac{\hat{F}(\tau) - \hat{\pi}_0 \tau}{\hat{F}(\tau)}$. 
+
+### (e) Can you think of a certain type of test for which p-values are likely not going to follow a Beta-Uniform distribution? Explain your reasoning. {.unnumbered}
+
+A test where the noise affects the signal would not follow a Beta-Uniform distribution. For example, if the noise is correlated with the signal, then the p-values would not follow a Beta-Uniform distribution.
+
+## Question 3 : Correlated observations when testing for differences. {.unnumbered}
+
+In this exercise we will explore the effect of the violation of independence of measurements.
+    
+###  (a) Write code that creates two samples of n=10 data points from the same  distributions with the same mean (m1) and same standard deviation sigma1, and run a t-test on the difference in means. Now we are going to modify how we create each of these two samples of ten points and make each set of 10 points correlated, for instance as longitudinal data would be.     { .unnumbered}
+
+To do this, we write a function that, given a correlation, $\rho$, generates 10 points such that each new point has $\rho$ correlation with the  previous point and the original point is from a Normal(m1,sigma1). You can do this by sampling each new point `x[i]` as `(rho) * x[i-1] + (1-rho) * new_points`, 
+with `x[1]` a random normal with mean m1  and standard deviation sigma1 the `new_points` as a random normal(0,1).
+
+(Hint: So you start with a random point from the right distribution, then create sequentially the 9 next points, then do this again separately for the second sample).
+
+```{r}
+sim <- function(rho, m1, sigma1) {
+    n <- 10
+    alpha = 0.05
+    
+    x1 <- numeric()
+    x1[1] <- rnorm(1, m1, sigma1)
+    for (i in 2:n) {
+        x1[i] <- rho * x1[i-1] + (1-rho) * rnorm(1, m1, sigma1)
+    }
+   
+    x2 <- numeric()
+    x2[1] <- rnorm(1, m1, sigma1)
+    for (i in 2:n) {
+        x2[i] <- rho * x2[i-1] + (1-rho) * rnorm(1, m1, sigma1)
+    }
+    
+    return( t.test(x1, x2)$p.value <= alpha )
+
+}
+
+```
+
+    
+### (b) Simulate two samples and do the test an appropriate number of times (B=10,000) and keep track of the false positive rate for a range of 20 values of $\rho$ from 0 to 1. {.unnumbered}
+
+Assuming any positive is a false positive because the two distributions are defined the same and internally dependent.
+
+```{r}
+set.seed(21)
+rhos <- seq(0.01, 0.99, length.out = 20)
+b = 10000
+
+fp = numeric()
+for (i in 1:length(rhos)){
+  rho = rhos[i]
+  fp[i] = sum(replicate(b, sim(rho, 0, 1))) / b
+}
+
+```
+
+    
+### (c) What happens as rho approaches 0? What happens as rho approaches 1? {.unnumbered}
+
+As rho approaches zero, the new data are pulled from the new normal with less influence of the previous data point. As rho approaches one, the new data are more influenced by the previous data point. Therefore, as rho approaches zero, the false positive rate approaches the significance level 5%, and as rho approaches one, the false positive rate approaches 100%.
+
+### (d) Using the results of part (c), generate an appropriate visualization that shows false positive rate as we vary rho.     { .unnumbered}
+(Hint : Make a ggplot2 visualization with a horizontal line at 0.05.)
+
+
+```{r}
+# use ggplot to plot fp by rhos
+ggplot(data.frame(rhos, fp), aes(x = rhos, y = fp)) + geom_line() + geom_hline(yintercept = 0.05, color = "red") + labs(x = "rho", y = "false positive rate")
+```
+    
+### (Bonus, open-ended) Suppose instead of using a t-test we use a permutation test. Do you think that this will address the issue? How do you think the two would compare? Show simulations or reasoning to support your answer. {.unnumbered}
+
+
+```{r, eval = FALSE}
+# install EnvStats package
+#install.packages("EnvStats")
+library(EnvStats)
+
+# use permutation test to test for difference in means
+sim2 <- function(rho, m1, sigma1) {
+    n <- 10
+    alpha = 0.05
+    
+    x1 <- numeric()
+    x1[1] <- rnorm(1, m1, sigma1)
+    for (i in 2:n) {
+        x1[i] <- rho * x1[i-1] + (1-rho) * rnorm(1, m1, sigma1)
+    }
+   
+    x2 <- numeric()
+    x2[1] <- rnorm(1, m1, sigma1)
+    for (i in 2:n) {
+        x2[i] <- rho * x2[i-1] + (1-rho) * rnorm(1, m1, sigma1)
+    }
+    
+    return( twoSamplePermutationTestLocation(x1, x2, alternative = "two.sided", n.permutations = 10000)$p.value <= alpha )
+
+}
+
+set.seed(21)
+rhos <- seq(0.01, 0.99, length.out = 20)
+b = 10000
+
+fp2 = numeric()
+for (i in 1:length(rhos)){
+  rho = rhos[i]
+  fp2[i] = sum(replicate(b, sim2(rho, 0, 1))) / b
+}
+
+# use ggplot to plot fp by rhos
+ggplot(data.frame(rhos, fp2), aes(x = rhos, y = fp2)) + geom_line() + geom_hline(yintercept = 0.05, color = "red") + labs(x = "rho", y = "false positive rate")
+
+
+```
+
+    
+
+## Question 4: Is Hypothesis filtering p-value hacking? {.unnumbered}
+
+In this section we want to illustrate that p-value hacking can sometimes be 
+very nuanced. In class and in the book, we discuss "Independent Filtering", i.e.
+a process in which instead of applying a multiple testing to all hypotheses, 
+one first remove some hypotheses ("filter them out") based on some 
+**independent criterion** (not related to the hypothesis being tested) 
+and thus hope to increase power.
+
+However, during the early 2000s, "filtering" (also called "screening") was 
+a debated topic. Some people claimed it was OK to do so (and in fact encouraged
+it), while others considered it to be equivalent to p-value hacking. 
+The actual answer is that **filtering might be statistical valid or not 
+depending on the filtering statistic used!** Here we will explore this through 
+simulations.
+
+You can also read the paper which provides a clarification on this topic.
+
+[Independent filtering increases detection power for high-throughput experiments.](http://www-huber.embl.de/pub/pdf/Bourgon_PNAS_2010.pdf) 
+Richard Bourgon, Robert Gentleman and Wolfgang Huber. 
+Proceedings of the National Academy of Sciences 107.21 (2010): 9546-9551.
+
+### (a) $t$-test simulation {.unnumbered}
+
+Write a small function that implements a null simulation:
+
+Draw 5 observations from a $\mathcal{N}(0,1)$ distribution and 5 additional
+observations from a $\mathcal{N}(0,1)$ distribution. Now run a $t$-test using 
+the function ``t.test`` (should you use ``var.equal = TRUE`` here?) to compare 
+the means of the two groups. Your function should return the p-value. To test 
+your function, run it 1000 times and plot the resulting histogram. The
+distribution of p-values you obtain should be approximately uniform!
+
+```{r}
+# define the function
+null_sim = function(){
+  # draw 5 observations from a N(0,1) distribution
+  d1 = rnorm(5,0,1)
+
+  # draw 5 additional observations from a N(0,1) distribution
+  d2 = rnorm(5,0,1)
+
+  # run a t-test using t.test
+  t = t.test(d1,d2,var.equal = TRUE)
+
+  # return the p-value
+  t$p.value
+}
+
+# run the simulation 1000 times
+p_vals = replicate(1000,null_sim())
+
+# plot histogram using ggplot
+ggplot(data.frame(p_vals),aes(x=p_vals)) + geom_histogram(bins=20)
+
+```
+
+
+
+### (b) Between-group and sample variance {.unnumbered}
+
+A simple idea for reducing the number of tests (and thus gain power) in a 
+hypothesis screening scenario is to only keep tests for which the data show 
+sufficient "variability". You can think of each of these 1000 tests as having 
+been performed on one of the 1000 genes in an attempt to screen for those 
+that are differentially expressed. (In the simulation above, no 
+gene is truly differentially expressed, and that's fine since we are after
+understanding the null situation, as a prequisite for finding signal once there 
+are indeed some of the genes differentially expressed.)
+
+For genes that show low variability overall, we are unlikely to be able to 
+detect any differences between groups, hence we might want to remove them before 
+doing any multiple testing. But is this statistically valid? The answer is that 
+it depends on what we mean by "variability". We will make the word "variability" 
+more precise in two different ways:
+
+Above, in each simulations we had $n_1 = n_2 = 5$ observations for the two groups. 
+Let $m_1$ and $m_2$ be the sample averages within the two groups. Also let $m$ 
+be the global mean (in this case this happens to be the mean of $m_1$ and 
+$m_2$ since we have the same number of observation in both groups).
+Now the between-group-variance is defined as follows:
+
+$$s_{\text{between}}^2 = n_1 (m_1-m)^2 + n_2 (m_2-m)^2$$
+
+Next, consider the (global) sample variance $s_{\text{sample}}^2$, which we get 
+by ignoring the group-assignment of the different observations 
+(i.e. ``var(c(obs1, obs2))``,  where ``obs1`` are the measurements from group 
+1 and ``obs2`` those from group 2.
+
+Now, modify your function from (a) to return not only the p-value, but also the
+between-group variance $s_{\text{between}}^2$ and the sample variance 
+$s_{\text{sample}}^2$.
+
+```{r}
+# define the function
+null_sim_var = function(){
+  # draw 5 observations from a N(0,1) distribution
+  d1 = rnorm(5,0,1)
+
+  # draw 5 additional observations from a N(0,1) distribution
+  d2 = rnorm(5,0,1)
+
+  # run a t-test using t.test
+  t = t.test(d1,d2,var.equal = TRUE)
+
+  # return the p-value
+  return(c(p_value = t$p.value,
+  
+  # return the between-group variance
+  s_between = 5*(mean(d1)-mean(c(d1,d2)))^2 + 5*(mean(d2)-mean(c(d1,d2)))^2,
+  
+  # return the sample variance
+  s_sample = var(c(d1,d2))
+  ))
+}
+
+```
+
+
+### (c) Filtering {.unnumbered}
+
+Use your function from above again to generate 10000 simulations. The p-value 
+histogram should still be uniform.
+
+```{r}
+# run the simulation 10000 times
+results = replicate(10000,null_sim_var())
+results = data.frame(t(results))
+
+# plot histogram using ggplot
+ggplot(results,aes(x=p_value)) + geom_histogram(bins=20)
+
+```
+
+
+### Next you will "filter" your dataset in 2 different ways. {.unnumbered}
+
+ - 1. Keep only the 50% of the genes with the highest between-group variance and plot the histogram of their p-values.
+ - 2. Keep only the 50% of the genes with the highest sample variance (which ignores labels) and plot their p-value histogram. Then, plot the distribution of the p-values for the data filtered as specified by method 1, and then as method 2.
+ 
+```{r}
+# subset only the top 50% with highest between-group variance
+results_filtered1 = results[order(results$s_between,decreasing=TRUE),][1:500,]
+
+# plot histogram
+ggplot(data.frame(results_filtered1),aes(x=p_value)) + geom_histogram(bins=20) + ggtitle("Highest between-group variance")
+
+# subset only the top 50% with highest sample variance
+results_filtered2 = results[order(results$s_sample,decreasing=TRUE),][1:500,]
+
+# plot histogram
+ggplot(data.frame(results_filtered2),aes(x=p_value)) + geom_histogram(bins=20) + ggtitle("Highest sample variance")
+
+```
+ 
+
+ What do you observe? 
+ 
+Filtering by the between-group variance generates a non-uniform p-value distribution, whereas, filtering by the sample variance seems to maintain the uniform. This is because the between-group variance is a measure of the variance within the two groups summed, whereas the sample variance is a measure of the variability overall. 
+
+ Would Method 1 of filtering be valid for subsequent multiple testing? What about Method 2?
+ 
+It seems like either method could be valid for subsequent multiple testing depending on the intention and documentation. However, method 1 does visually seem to bias towards significance.
+
+
+### (d) Filtering and power (bonus -- not required) {.unnumbered}
+
+Here we will see that filtering can increase power.
+
+* Write a function as in part (b) but this time simulating under 
+a different alternative: 
+Take 5 observations ${\it N}(0,1)$ and 5 observations ${\it N}(2,1)$ 
+and apply a $t$-test to these.
+
+```{r}
+# define the function
+alt_sim_var = function(){
+  # draw 5 observations from a N(0,1) distribution
+  d1 = rnorm(5,0,1)
+
+  # draw 5 additional observations from a N(2,1) distribution
+  d2 = rnorm(5,2,1)
+
+  # run a t-test using t.test
+  t = t.test(d1,d2,var.equal = TRUE)
+
+  # return the p-value
+  return(c(p_value = t$p.value,
+  
+  # return the between-group variance
+  s_between = 5*(mean(d1)-mean(c(d1,d2)))^2 + 5*(mean(d2)-mean(c(d1,d2)))^2,
+  
+  # return the sample variance
+  s_sample = var(c(d1,d2))
+  ))
+}
+```
+
+
+* Generate 1000 simulations under the above alternative (using your function) 
+and merge the result to your 10000 simulations from part (b) to get a total of 
+11000 simulations. 
+
+```{r}
+# run the simulation 1000 times
+results_alt = replicate(1000,alt_sim_var())
+
+# merge the results
+results_all = rbind(results,data.frame(t(results_alt)))
+
+```
+
+
+* Apply Benjamini-Hochberg multiple testing p-value adjustment to the whole 
+dataset. How many rejections do you make at the level $\alpha$=0.1? 
+Make a histogram of all the adjusted p-values.
+
+```{r}
+# apply Benjamini-Hochberg
+results_all$adj_p = p.adjust(results_all$p_value,method="BH")
+sum(results_all$adj_p <= 0.1)
+
+# plot histogram
+ggplot(results_all,aes(x=adj_p)) + geom_histogram(bins=20)
+```
+
+
+* Now proceed as in part (c) and retain (from the whole dataset of 11000 genes)
+only 50% of the genes with the highest between-group or sample variance,
+i.e. follow the procedure described in part(c). Next, apply Benjamini-Hochberg 
+to the retained (unadjusted) p-values. How many rejections do you get now?
+Plot a histogram of the obtained adjusted p-values for the filered dataset. 
+What happened to the p-values? How did the distribution due to filtering change?
+
+```{r}
+# subset only the top 50% with highest between-group variance
+results_all_filtered1 = results_all[order(results_all$s_between,decreasing=TRUE),][1:500,]
+
+# apply Benjamini-Hochberg
+results_all_filtered1$adj_p = p.adjust(results_all_filtered1$p_value,method="BH")
+
+sum(results_all_filtered1$adj_p <= 0.1)
+
+# plot histogram
+ggplot(results_all_filtered1,aes(x=adj_p)) + geom_histogram(bins=20)
+
+
+# subset only the top 50% with highest sample variance
+results_all_filtered2 = results_all[order(results_all$s_sample,decreasing=TRUE),][1:500,]
+
+# apply Benjamini-Hochberg
+results_all_filtered2$adj_p = p.adjust(results_all_filtered2$p_value,method="BH")
+
+sum(results_all_filtered2$adj_p <= 0.1)
+
+# plot histogram
+ggplot(results_all_filtered2,aes(x=adj_p)) + geom_histogram(bins=20)
+
+```
 
 
 
@@ -115,7 +627,6 @@ dates_in_subset_2 = dplyr::group_by(covid_subset_2, state) %>%
 
 * Normalize the daily new deaths by the states' population and calculate cases per 100,000. Note that the daily counts are bumpy and demonstrate weekly patterns (large on weekdays and small on weekends). Compute the $7$-day moving average for cases and deaths per 100,000. Hint: the function _rollmean_ in the _zoo_ package may be helpful. See here (https://www.storybench.org/how-to-calculate-a-rolling-average-in-r/) and here (https://www.rdocumentation.org/packages/zoo/versions/1.8-9/topics/rollmean) for examples.
 
-Note: I am assuming that we used the filtered dataset.
 
 ```{r}
 # normalize daily new deaths by population
@@ -123,6 +634,14 @@ covid_subset_2$deaths_per_100k = covid_subset_2$actuals.newDeaths / covid_subset
 
 # calculate cases per 100,000
 covid_subset_2$cases_per_100k = covid_subset_2$actuals.newCases / covid_subset_2$population * 100000
+
+# calculate 7-day moving average for cases and deaths per 100,000
+#install.packages("zoo")
+library(zoo)
+covid_subset_2$date = as.Date(covid_subset_2$date)
+covid_subset_2$cases_per_100k_7day = rollmean(covid_subset_2$cases_per_100k, k = 7, fill = NA) # na.trim(T) if wanting to trim NAs
+covid_subset_2$deaths_per_100k_7day = rollmean(covid_subset_2$deaths_per_100k, k = 7, fill = NA) 
+
 ```
 
 
@@ -131,15 +650,96 @@ covid_subset_2$cases_per_100k = covid_subset_2$actuals.newCases / covid_subset_2
 
 * Let's visualize the new cases and new deaths using ridgeline plots. Ridgeline plots are partially overlapping line plots that create the impression of a mountain range. They can be quite useful for visualizing changes over time and space. We will use the package `ggridges` for ridgeline plots. Plot the averaged new cases using `geom_ridgeline` and comment on the peaks. (The comment is open-ended and any plausible answers are accepted.)
 
+```{r}
+# install.packages("ggridges")
+library(ggridges)
+
+# plot averaged new cases
+ggplot(covid_subset_2, aes(x = date, y = cases_per_100k_7day, fill = state, height = cases_per_100k_7day)) + # height must be defined
+  geom_ridgeline() +
+  scale_fill_manual(values = c("NY" = "blue", "CA" = "red", "ID" = "green", "FL" = "orange")) +
+  labs(title = "7-Day Moving Averaged New Cases by State", x = "Date", y = "Cases per 100,000") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_bw()
+```
+Commentary: New York has the highest peak in cases early on. This may be because NY had more travel through the major metropolitan areas. January 2021 and August 2021 had the highest peaks across all four states. This is likely because of the new variants (Omicron and Delta, respectively) and holiday travel. The dip around June 2021 may have been correlated with release of vaccines for broader public use.
+
+Refernce: https://ourworldindata.org/grapher/covid-variants-area
+
+
 * Plot the new deaths using `geom_ridgeline`, compare with the new cases, and comment. (The comment is open-ended and any plausible answers are accepted.)
 
+```{r}
+# plot new deaths
+ggplot(covid_subset_2, aes(x = date, y = deaths_per_100k_7day, fill = state, height = deaths_per_100k_7day)) + 
+  geom_ridgeline() +
+  scale_fill_manual(values = c("NY" = "blue", "CA" = "red", "ID" = "green", "FL" = "orange")) +
+  labs(title = "7-Day Moving Averaged New Cases by State", x = "Date", y = "Cases per 100,000") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_bw()
+```
+
+Commentary: The peaks are similar in timing, however, the early NY peak is much higher amplitude than the rest. This is likely when hospital resources were overwhelmed.
 
 ### (d) More Visualization - Clustering {.unnumbered}
 
 * Now let's explore clustering between states. Subset the data frame to about 10 states of personal interest to you. Then do a little data cleaning: limit the data to only those with no missing data on the metrics.caseDensity variable. Find the mean monthly smoothed cases (mean of metrics.caseDensity by month) for each state. 
 
+```{r}
+# subset to 10 states of interest
+covid_subset_3 = subset(covid_subset, state %in% c("NY", "CA", "ID", "FL", "TX", "WA", "OR", "AZ", "GA", "NC"))
+
+# limit data to only those with no missing data on the metrics.caseDensity variable
+covid_subset_3 = subset(covid_subset_3, !is.na(metrics.caseDensity))
+
+library(tidyverse)
+
+covid_subset_3$date = as.Date(covid_subset_3$date)
+covid_subset_3$ym = as.yearmon(covid_subset_3$date) # zoo package
+
+covid_subset_month = covid_subset_3 %>% 
+    group_by(state, ym) %>%
+    summarize(mean = mean(metrics.caseDensity))
+
+covid_subset_month$id = paste(covid_subset_month$state, covid_subset_month$ym, sep = " ")
+covid_subset_month = covid_subset_month[,c("id", "mean")]
+```
+
+
 * Next, perform clustering on your chosen states for their mean monthly smoothed cases. In ‘base’ R a function to perform hierarchical clustering is hclust(). To cluster states with hierarchical clustering you first need to compute a distance matrix storing all pairwise dissimilarities. Filter your data as needed to make the plot readable (e.g. consider only clustering states in 2021, or by certain seasons- you can decide based on what seems interesting to you!). Make some observations about your resulting plot- which states and time periods are most similar? 
 
+```{r}
+# compute distance matrix
+covid_subset_month_dist = dist(covid_subset_month$mean)
+
+# perform hierarchical clustering
+covid_subset_month_hclust = hclust(covid_subset_month_dist)
+
+covid_subset_month_hclust$labels = covid_subset_month$id
+library(ggdendro)
+ddata <- dendro_data(covid_subset_month_hclust, type="rectangle")
+ggdendrogram(ddata)
 
 
+# subset to 2020
+covid_subset_month_2020 = subset(covid_subset_month, grepl("2020", covid_subset_month$id))
 
+# compute distance matrix
+covid_subset_month_2020_dist = dist(covid_subset_month_2020$mean)
+
+# perform hierarchical clustering
+covid_subset_month_2020_hclust = hclust(covid_subset_month_2020_dist)
+
+covid_subset_month_2020_hclust$labels = covid_subset_month_2020$id
+
+ddata2020 <- dendro_data(covid_subset_month_2020_hclust, type="rectangle")
+
+ggdendrogram(ddata2020)
+
+
+```
+
+It seems like there is some seasonal clustering within the years. The states seem to be scattered throughout the clusters.
+
+
+As a note for the teaching team: I found this exercise using covid data fairly stressful. This was a personally challenging time for all of us. While "playing" with the data is intellectually interesting, I strongly suggest including a content warning.
