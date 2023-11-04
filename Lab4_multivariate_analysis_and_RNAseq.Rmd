@@ -990,3 +990,5 @@ As a note of caution: The two p-values calculated above (one with ~condition
 and one with ~type+condition) correspond to different null hypotheses. This 
 can be a problem when the blocking factor and condition are correlated.
 
+# what is the null hypothesis when we have a blocking factor?
+
