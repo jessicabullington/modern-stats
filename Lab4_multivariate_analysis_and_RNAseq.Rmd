@@ -27,6 +27,10 @@ on Canvas.
 Please do not provide more information than the answers requested as Canvas expects
 compact, precise answers.
 
+```{r}
+# clear workspace
+rm(list=ls())
+```
 
 # Multivariate analysis
 
@@ -75,7 +79,7 @@ ggpairs(turtles[,-1], axisLabels="none")
 Can you do the same for the athletes data?
 
 ```{r}
-# TODO
+ggpairs(athletes, axisLabels="none")
 ```
 
 Correlations can be displayed on a color scale by a simple call to the `pheatmap` function:
@@ -100,17 +104,26 @@ ggplot(scaledTurtles,aes(x=width,y=height, group =sex)) +
 Can you compute the standard deviation and mean of each column in the `turtles`
 data frame? Can you do the same on the scaled dataset, i.e. on `scaledturtles`?
 
-**Quiz question 1**: What was the mean of turtles' heights before standardizing?
-
-**Quiz question 2**: What was the standard deviation of turtles' widths before standardizing?
-
-**Quiz question 3**: What was the standard deviation of turtles' widths after standardizing?
-
-
 ```{r}
-# TODO
+# use dpylr to compute the mean and standard deviation of each column in the turtles data frame if numeric
+summary_turtles = turtles %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd))
+
+summary_scaleTurtles = scaledTurtles %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd))
+
 ```
 
+
+**Quiz question 1**: What was the mean of turtles' heights before standardizing?
+# 46.33333
+
+**Quiz question 2**: What was the standard deviation of turtles' widths before standardizing?
+# 12.67584
+
+**Quiz question 3**: What was the standard deviation of turtles' widths after standardizing?
+# 1
+# should all be mean 0 and sd of 1
 
 ## PCA
 
@@ -133,9 +146,27 @@ Now try to do the following:
 **Quiz question 4**: Calculate the variance of the red points in the above
 figure. (points are projected onto the weight-axis).
 
+```{r}
+# variance of the red points
+var(athletes$weight)
+```
+
+
 **Quiz question 5**: Make a similar plot showing projection lines onto the y 
 axis and show projected points in blue. What is the variance of the projected 
 points now?
+
+```{r}
+# plot showing projection lines onto the y axis and show projected points in blue
+p = ggplot(athletes, aes(x = weight,y=  disc)) +
+  geom_point(size = 2, shape=21)
+p + geom_point(aes(x = rep(0, n)), colour="blue") +
+  geom_segment(aes(xend = rep(0, n), yend = disc), linetype = "dashed")
+
+var(athletes$disc)
+
+```
+
 
 ### Summarize 2D-data by a line
 
@@ -153,20 +184,31 @@ pline + geom_segment(aes(xend = weight, yend = reg1$fitted),
 Can you regress `weight` on `discs` and generate a similar plot? 
 
 ```{r}
-# TODO
+p2 = ggplot(athletes, aes(x = disc,y=  weight)) +
+  geom_point(size = 2, shape=21)
+
+reg2 = lm(weight~disc,data = athletes)
+a2 = reg2$coefficients[1] # Intercept
+b2 = reg2$coefficients[2] # slope
+pline2 = p2 + geom_abline(intercept = a2, slope = b2, col = "blue", lwd = 1.5)
+pline2 + geom_segment(aes(xend = disc, yend = reg2$fitted),
+                     colour = "red", arrow = arrow(length = unit(0.15,"cm")))
 ```
 
 Can you create a plot that shows all points, as well as both regression lines, i.e., a plot that show both the line you get from `lm(disc ~ weight)` and `lm(weight ~ disc)`?
 
 ```{r}
-# TODO
+# plot that shows both the line you get from lm(disc ~ weight) and lm(weight ~ disc)
+p2 + geom_abline(intercept = a2, slope = b2, col = "blue", lwd = 1.5) +
+  geom_abline(intercept = a, slope = b, col = "red", lwd = 1.5) # not sure this is working
+
 ```
 
 Now we will plot the line chosen to minimize the sum of squares of the orthogonal (perpendicular) projections of data points onto it; we call this the principal component line.
 
 ```{r PCAmin}
 X = cbind(athletes$disc, athletes$weight)
-svda = svd(X)
+svda = svd(X) # singular value decomposition
 pc = X %*% svda$v[, 1] %*% t(svda$v[, 1])
 bp = svda$v[2, 1] / svda$v[1, 1]
 ap = mean(pc[, 2]) - bp * mean(pc[, 1])
@@ -179,7 +221,13 @@ p + geom_segment(xend = pc[,1], yend = pc[,2]) +
 Can you create a plot that includes both the line from the plot above, plus the two regression lines `lm(disc ~ weight)` and `lm(weight ~ disc)`?
 
 ```{r}
-#TODO
+# plot that includes both the line from the plot above, plus the two regression lines lm(disc ~ weight) and lm(weight ~ disc)
+p + geom_segment(xend = pc[,1], yend = pc[,2]) + 
+  geom_abline(intercept = ap, slope = bp, col = "purple", lwd = 1.5) + 
+  coord_fixed() + geom_abline(intercept = a2, slope = b2, col = "blue", lwd = 1.5) +
+ geom_abline(intercept = a, slope = b, col = "red", lwd = 1.5) # not sure this is working
+
+
 ```
 
 
@@ -196,10 +244,23 @@ ggplot(ppdf,aes(x = PC1n, y=PC2n)) + geom_point() + ylab("PC2 ") +
 ```
 
 **Quiz question 6**: What are the sums of squares of the red segments equal to?
+```{r}
+sum((ppdf$PC1n)^2)
+```
+
 
 **Quiz question 7**: What is the variance of this new set of red points?
+```{r}
+var(ppdf$PC1n)
+```
+
 
 **Quiz question 8**: What is the sum of the variances of `ppdf$PC1n` and `ppdf$PC2n`?
+
+```{r}
+sum(var(ppdf$PC1n), var(ppdf$PC2n))
+```
+
 
 We could have gotten the same results using the `princomp` command as follows:
 
@@ -224,9 +285,24 @@ head(svda$u %*% diag(svda$d))
 
 **Quiz question 9**: Which field in `pca_athletes` contains approximately the same object as `c(sd(ppdf$PC1n), sd(ppdf$PC2n))`? 
 
+```{r}
+pca_athletes$sdev
+c(sd(ppdf$PC1n), sd(ppdf$PC2n))
+```
+
+
 **Quiz question 10**: Unfortunately the results stored in the above field do not perfectly match  `c(sd(ppdf$PC1n), sd(ppdf$PC2n))`. If you multiply by which correction factor will you get the results to match `c(sd(ppdf$PC1n), sd(ppdf$PC2n))`?
 
+```{r}
+pca_athletes$sdev * sqrt(22/21)
+pca_athletes$sdev * sqrt(33/32) # yes
+
+```
+
+
 The difference is that ``princomp`` returns unbiased estimates of sample standard deviations.
+
+# what does unbiased mean?
 
 ### Turtle PCA
 
@@ -268,11 +344,17 @@ The screeplot showing the eigenvalues for the standardized data: one very large 
 explained by the first PC?
 
 ```{r}
-# TODO
+# percent of variance explained by first PC
+pca1$sdev[1]^2 / sum(pca1$sdev^2)
 ```
 
 ```{r turtlesplotvar}
 fviz_pca_var(pca1, label = "var") +coord_fixed()
+```
+
+```{r}
+fviz_pca_var(pca1, col.circle = "black") + ggtitle("") +
+  xlim(c(-1.2, 1.2)) + ylim(c(-1.2, 1.2))
 ```
 
 
@@ -294,11 +376,15 @@ fviz_pca_ind(pca1, col.ind = turtles[,1])
 Add ellipses for female and male groups to the plot above.
 
 ```{r}
-# TODO
+# add ellipses
+fviz_pca_ind(pca1, col.ind = turtles[,1]) +
+  stat_ellipse(aes(fill = turtles[,1]), geom = "polygon", alpha = 0.2)
+
 ```
 
 
 **Quiz question 12**: Did the males or female turtles tend to be larger?
+# F
 
 ### Back to the athletes
 
@@ -326,6 +412,8 @@ It can seem paradoxical that the m variables are opposed to the others.
 
 **Question (not on the quiz): Why does this occur?**
 
+# I think this is because runners are different than the weight challenges.
+
 We can make the variables align and give the left direction on PCA 1 to
 be an axis of athletic ability by changing the signs:
 
@@ -341,6 +429,8 @@ pcan.ath$eig
 
 **Quiz Question 13**:  Changing the signs for some variables changes the variances explained by the PCs (True/False)?
 
+# False, you can switch up the signs to move things around.
+
 
 ```{r}
 fviz_pca_var(pcan.ath, col.circle="black") + ggtitle("")
@@ -351,6 +441,7 @@ fviz_pca_ind(pcan.ath) + ggtitle("") + ylim(c(-2.5,5.7))
 ```
 
 What do you notice about the numbers labeling the points?
+# almost look in order
 
 
 # RNA-Seq
@@ -439,7 +530,9 @@ The design is approximately balanced between the factor of interest,
 Use the ``table`` function.
 
 ```{r condvstype}
-# TODO
+# use the table function to check the balance of condition and type
+table(pasillaSampleAnno$condition, pasillaSampleAnno$type)
+
 ```
 
 We use the constructor function ``DESeqDataSetFromMatrix`` to create a
@@ -474,6 +567,10 @@ the ``counts`` table.
 also saved some column metadata which we had initially stored in 
 `pasillaSampleAnno`. With which function can we extract this information again?
 (Hint:`?SummarizedExperiment`)
+
+```{r}
+colData(pasilla)
+```
 
 
 
@@ -569,6 +666,14 @@ histogram object.
 
 ```{r hist2}
 pv_hist <- hist(res$pvalue, breaks=seq(0,1, length=100), plot=FALSE)
+
+total = pv_hist$counts[1] # total rejects
+
+# median bin count
+fp = median(pv_hist$counts) # estimated false positives
+
+# FDR
+fp/total*100
 ```
 
 Recall from class the we can use `p.adjust` function to conduct multiple testing 
@@ -583,8 +688,30 @@ pvals <- na.omit(res$pvalue)
 **Quiz Question 16**: How many hypotheses do you reject with Benjamini-Hochberg 
 at a FDR of 0.1?
 
+```{r}
+adjp = p.adjust(pvals, method = "BH") 
+sum(adjp <= 0.1)
+
+# out of 12358
+```
+
+
 **Quiz Question 17**: How many hypotheses do you reject with Bonferroni at a 
 FWER of 0.1?
+
+```{r}
+adjp = p.adjust(pvals, method = "bonferroni")
+sum(adjp <= 0.1)
+
+```
+
+
+```{r}
+adjp = na.omit(res$padj)
+sum(adjp <= 0.1)
+
+```
+
 
 You might notice that your answer to 3 is different than what the adjusted
 p-values in `res$padj` might imply; the reason is that internally DESeq2 
@@ -617,7 +744,7 @@ Now try to modify the following code by shifting the mean of the second and
 fourth sample by two?
 
 ```{r skewed_hist, fig.width = 4.5, fig.height = 4.5}
-# TODO
+
 #set.seed(0xdada2)
 #y = cbind(rnorm(10000, ?, 1),
 #          rnorm(10000, ?, 1),
@@ -626,6 +753,8 @@ fourth sample by two?
 #pvalue = rowttests(y, factor(c("C","C","T","T")))$p.value
 #ggplot(tibble(pvalue), aes(x = pvalue)) +
 #  geom_histogram(binwidth = 0.01, fill = "Royalblue", boundary = 0)
+
+
 ```
 
 One way to take such batch effects into account is by adding the batch factor 
@@ -711,9 +840,50 @@ If you want, you can try a different heatmap package (for example "ComplexHeatma
 and explore a more enriched heatmap plot.
 
 ```{r}
-# BiocManager::install("ComplexHeatmap")
-# library("ComplexHeatmap")
-# TODO
+BiocManager::install("ComplexHeatmap")
+library("ComplexHeatmap")
+
+```
+```{r}
+library("ComplexHeatmap")
+select = order(rowMeans(assay(pas_rlog)), decreasing = TRUE)[1:30]
+
+# simple Heatmap with type and condition 
+
+
+Heatmap(
+  assay(pas_rlog)[select, ],
+  name = "rlog",
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  show_row_names = FALSE,
+  show_column_names = FALSE,
+  column_title = "Samples",
+  column_names_gp = gpar(fontsize = 8),
+  column_title_gp = gpar(fontsize = 10),
+  heatmap_legend_param = list(title = "rlog"),
+  top_annotation = HeatmapAnnotation(
+    "Condition" = anno_block(
+      col = colData(pas_rlog)$condition,
+      border = TRUE,
+      border_gp = gpar(col = "black", lwd = 0.5),
+      width = unit(1, "cm"),
+      height = unit(1, "cm"),
+      annotation_name_gp = gpar(fontsize = 8),
+      labels_gp = gpar(fontsize = 8)
+    ),
+    "Type" = anno_block(
+      col = colData(pas_rlog)$type,
+      border = TRUE,
+      border_gp = gpar(col = "black", lwd = 0.5),
+      width = unit(1, "cm"),
+      height = unit(1, "cm"),
+      annotation_name_gp = gpar(fontsize = 8),
+      labels_gp = gpar(fontsize = 8)
+    )
+  )
+)
+
 ```
 
 
@@ -729,7 +899,7 @@ confounded --or masked-- by the sequencing type.
 
 ```{r replaceDesign}
 pasillaTwoFactor = pasilla
-design(pasillaTwoFactor) = formula(~ type + condition)
+design(pasillaTwoFactor) = formula(~ type + condition) # DESEQ with TWO FACTORS!!!!
 pasillaTwoFactor = DESeq(pasillaTwoFactor)
 ```
 
